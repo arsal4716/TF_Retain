@@ -6,7 +6,7 @@ let context;
 async function init() {
   if (!browser) {
     browser = await chromium.launch({
-      headless: false,
+      headless: true,
       slowMo: 300,
     });
 
