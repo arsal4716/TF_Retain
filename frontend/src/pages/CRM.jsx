@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import axios from "axios";
 
-const API_URL = "http://localhost:5000/api/records";
+const API_URL = "/api/records";
 
 function statusBadge(status) {
   const base =
