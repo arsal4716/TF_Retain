@@ -32,15 +32,8 @@ const runAutomation = require("../automation/tfAutomation");
           const result = await runAutomation(event.certUrl);
           console.log("Ringba TF automation result:", result);
 
-          const msg = String(result?.message || "").toLowerCase();
-          const forceRetained =
-            msg.includes("retained") ||
-            msg.includes("already retained") ||
-            msg.includes("you've retained") ||
-            msg.includes("you have retained") ||
-            msg.includes("certificate retained");
-
-          const isSuccess = Boolean(result?.success) || forceRetained;
+          // DO NOT use loose "retained" substring matching.
+          const isSuccess = Boolean(result?.success) === true;
 
           event.status = isSuccess ? "retained" : "error";
           event.message = result?.message || "";
