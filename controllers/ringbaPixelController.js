@@ -71,6 +71,7 @@ exports.handleFinalizedPixel = async (req, res) => {
         removeOnFail: 1000,
       }
     );
+
     return res.status(202).json({
       success: true,
       queued: true,

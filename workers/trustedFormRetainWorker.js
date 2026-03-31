@@ -5,9 +5,7 @@ const { Worker } = require("bullmq");
 const connection = require("../config/redis");
 const connectDB = require("../config/db");
 const TrustedFormRetainEvent = require("../models/TrustedFormRetainEvent");
-const {
-  retainTrustedFormCertificate,
-} = require("../services/trustedFormApiService");
+const runAutomation = require("../automation/tfAutomation");
 
 (async () => {
   try {
@@ -31,36 +29,32 @@ const {
         await event.save();
 
         try {
-          const result = await retainTrustedFormCertificate({
-            trustedId: event.trustedId,
-            phoneNumber: event.phoneNumberRaw,
-          });
+          const result = await runAutomation(event.certUrl);
+          console.log("Ringba TF automation result:", result);
 
-          event.tfOutcome = result.outcome || "";
-          event.tfReason = result.reason || "";
-          event.tfResponse = result.data || null;
+          const msg = String(result?.message || "").toLowerCase();
+          const forceRetained =
+            msg.includes("retained") ||
+            msg.includes("already retained") ||
+            msg.includes("you've retained") ||
+            msg.includes("you have retained") ||
+            msg.includes("certificate retained");
+
+          const isSuccess = Boolean(result?.success) || forceRetained;
+
+          event.status = isSuccess ? "retained" : "error";
+          event.message = result?.message || "";
           event.processedAt = new Date();
-
-          if (result.ok) {
-            event.status = "retained";
-            event.message = "TrustedForm retained successfully";
-          } else {
-            event.status = "error";
-            event.message =
-              result.reason ||
-              `TrustedForm retain failed with status ${result.statusCode}`;
-          }
-
           await event.save();
 
           console.log("TrustedForm retain result:", {
             eventId: String(event._id),
-            ok: result.ok,
-            outcome: result.outcome,
-            reason: result.reason,
-            statusCode: result.statusCode,
+            isSuccess,
+            message: event.message,
           });
         } catch (error) {
+          console.error("TrustedForm retain worker error:", error);
+
           event.status = "error";
           event.message = error.message || "TrustedForm retain failed";
           event.processedAt = new Date();
@@ -71,7 +65,7 @@ const {
       },
       {
         connection,
-        concurrency: Number(process.env.CONCURRENCY || 5),
+        concurrency: Number(process.env.CONCURRENCY || 1),
       }
     );
 
