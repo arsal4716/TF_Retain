@@ -34,7 +34,6 @@ function normalize(text) {
 
 function isRealRetainedText(text) {
   const t = normalize(text).toLowerCase();
-
   return (
     t.includes("you've retained this certificate") ||
     t.includes("you have retained this certificate") ||
@@ -47,15 +46,6 @@ function isUnretainedText(text) {
   return normalize(text).toLowerCase().includes("unretained certificate");
 }
 
-function isLoginRequiredText(text) {
-  const t = normalize(text).toLowerCase();
-  return (
-    (t.includes("please log in") && t.includes("retain this certificate")) ||
-    t.includes("business email address") ||
-    t.includes("password is required")
-  );
-}
-
 function getBestMessage(text) {
   const t = normalize(text);
 
@@ -65,9 +55,6 @@ function getBestMessage(text) {
   if (/certificate has been retained/i.test(t)) return "Retained";
   if (/already retained/i.test(t)) return "Already retained";
   if (/unretained certificate/i.test(t)) return "Unretained certificate";
-  if (/please log in/i.test(t) && /retain this certificate/i.test(t)) {
-    return "Login required before retain";
-  }
 
   return t.slice(0, 300);
 }
@@ -90,7 +77,7 @@ async function doLogin(page) {
   await submitBtn.click();
 
   await page.waitForLoadState("networkidle", { timeout: 60000 }).catch(() => {});
-  await page.waitForTimeout(5000);
+  await page.waitForTimeout(4000);
 
   console.log("Login submitted");
 }
@@ -107,7 +94,7 @@ async function ensureLoggedInForCertificate(page, certificateUrl) {
   let currentUrl = page.url();
 
   console.log("Current URL:", currentUrl);
-  console.log("Body preview:", bodyText.slice(0, 400));
+  console.log("Body preview:", bodyText.slice(0, 500));
 
   const onAuthLoginPage =
     currentUrl.includes("auth.activeprospect.com") ||
@@ -134,10 +121,46 @@ async function ensureLoggedInForCertificate(page, certificateUrl) {
     currentUrl = page.url();
 
     console.log("Returned after login:", currentUrl);
-    console.log("After login body:", bodyText.slice(0, 400));
+    console.log("After login body:", bodyText.slice(0, 500));
   }
 
   return { bodyText, currentUrl };
+}
+
+async function clickReloadIfPresent(page) {
+  const reloadSelectors = [
+    'a:has-text("Click here to reload")',
+    'button:has-text("Click here to reload")',
+    'a:has-text("reload")',
+  ];
+
+  for (const selector of reloadSelectors) {
+    const locator = page.locator(selector).first();
+    if (!(await locator.count())) continue;
+
+    const visible = await locator.isVisible().catch(() => false);
+    if (!visible) continue;
+
+    console.log("Reload link found:", selector);
+
+    try {
+      await locator.scrollIntoViewIfNeeded().catch(() => {});
+      await locator.click({ timeout: 5000 });
+    } catch {
+      try {
+        await locator.click({ force: true, timeout: 5000 });
+      } catch {
+        await locator.evaluate((el) => el.click());
+      }
+    }
+
+    await page.waitForLoadState("domcontentloaded").catch(() => {});
+    await page.waitForTimeout(3000);
+
+    return true;
+  }
+
+  return false;
 }
 
 async function clickRetainIfPresent(page) {
@@ -156,19 +179,50 @@ async function clickRetainIfPresent(page) {
     const visible = await locator.isVisible().catch(() => false);
     if (!visible) continue;
 
-    console.log("Retain button found with selector:", selector);
-
-    await locator.scrollIntoViewIfNeeded().catch(() => {});
-    await page.waitForTimeout(500);
+    console.log("Retain button found:", selector);
 
     try {
-      await locator.click({ timeout: 10000 });
-    } catch {
-      await locator.click({ force: true, timeout: 10000 });
+      await locator.waitFor({ state: "visible", timeout: 10000 });
+    } catch {}
+
+    try {
+      await locator.scrollIntoViewIfNeeded().catch(() => {});
+      await page.waitForTimeout(300);
+
+      // check if enabled
+      const disabled = await locator.isDisabled().catch(() => false);
+      console.log("Retain button disabled:", disabled);
+
+      if (disabled) {
+        continue;
+      }
+
+      // try normal click
+      await locator.click({ timeout: 5000 });
+      console.log("Retain button clicked with normal click");
+      return true;
+    } catch (err1) {
+      console.log("Normal click failed:", err1.message);
     }
 
-    console.log("Retain button clicked");
-    return true;
+    try {
+      await locator.click({ force: true, timeout: 5000 });
+      console.log("Retain button clicked with force click");
+      return true;
+    } catch (err2) {
+      console.log("Force click failed:", err2.message);
+    }
+
+    try {
+      await locator.evaluate((el) => {
+        el.scrollIntoView({ block: "center", inline: "center" });
+        el.click();
+      });
+      console.log("Retain button clicked with JS evaluate click");
+      return true;
+    } catch (err3) {
+      console.log("JS click failed:", err3.message);
+    }
   }
 
   return false;
@@ -178,8 +232,8 @@ async function waitForFinalRetainState(page, certificateUrl) {
   for (let i = 0; i < 10; i++) {
     await page.waitForTimeout(2000);
 
-    const bodyText = await getBodyText(page);
-    console.log(`Retain state check ${i + 1}:`, bodyText.slice(0, 400));
+    let bodyText = await getBodyText(page);
+    console.log(`Retain state check ${i + 1}:`, bodyText.slice(0, 500));
 
     if (isRealRetainedText(bodyText)) {
       return {
@@ -188,43 +242,41 @@ async function waitForFinalRetainState(page, certificateUrl) {
       };
     }
 
-    // sometimes TrustedForm says reload after match
-    if (
-      /click here to reload/i.test(bodyText) ||
-      /successfully matched a value/i.test(bodyText)
-    ) {
-      console.log("Reloading certificate page to verify retained state...");
-      await page.goto(certificateUrl, {
-        waitUntil: "domcontentloaded",
-        timeout: 180000,
-      });
-      await page.waitForTimeout(3000);
+    if (/click here to reload/i.test(bodyText)) {
+      console.log("Reload requested by page after click...");
+      await clickReloadIfPresent(page);
+      bodyText = await getBodyText(page);
 
-      const reloadedText = await getBodyText(page);
-      console.log("After reload:", reloadedText.slice(0, 400));
-
-      if (isRealRetainedText(reloadedText)) {
+      if (isRealRetainedText(bodyText)) {
         return {
           success: true,
-          message: getBestMessage(reloadedText),
+          message: getBestMessage(bodyText),
         };
       }
+    }
 
-      if (isUnretainedText(reloadedText)) {
-        return {
-          success: false,
-          message: "Still unretained after reload",
-        };
+    // if still unretained, retry one more click during polling
+    if (isUnretainedText(bodyText)) {
+      const clickedAgain = await clickRetainIfPresent(page);
+      if (clickedAgain) {
+        console.log("Retain re-click attempted during polling");
       }
     }
   }
 
   const finalText = await getBodyText(page);
 
+  if (isRealRetainedText(finalText)) {
+    return {
+      success: true,
+      message: getBestMessage(finalText),
+    };
+  }
+
   if (isUnretainedText(finalText)) {
     return {
       success: false,
-      message: "Certificate still unretained",
+      message: "Certificate still unretained after click attempt",
     };
   }
 
@@ -265,26 +317,34 @@ module.exports = async (url) => {
       };
     }
 
+    // very important: TF often asks to reload after match before retain flow settles
+    if (/click here to reload/i.test(bodyText)) {
+      console.log("Page asks for reload before retain");
+      await clickReloadIfPresent(page);
+      bodyText = await getBodyText(page);
+      console.log("After reload body:", bodyText.slice(0, 500));
+
+      if (isRealRetainedText(bodyText)) {
+        return {
+          success: true,
+          message: getBestMessage(bodyText),
+        };
+      }
+    }
+
     const clicked = await clickRetainIfPresent(page);
 
     if (!clicked) {
       bodyText = await getBodyText(page);
-
-      if (isUnretainedText(bodyText)) {
-        return {
-          success: false,
-          message: "Retain button found but not clicked",
-        };
-      }
-
       return {
         success: false,
-        message: getBestMessage(bodyText) || "Retain button not found",
+        message: "Retain button found but not clicked",
       };
     }
 
     const result = await waitForFinalRetainState(page, url);
     console.log("Final retain result:", result);
+
     return result;
   } catch (err) {
     console.error("Playwright error:", err);
