@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback } from "react";
 import axios from "axios";
 
-const API_URL = "/api/records";
+const API_URL = "/api/portal/records";
+const PAGE_SIZE = 20;
 
 function statusBadge(status) {
   const base =
@@ -14,7 +15,21 @@ function statusBadge(status) {
     case "processing":
       return `${base} bg-amber-100 text-amber-700`;
     case "pending":
+    case "queued":
       return `${base} bg-slate-200 text-slate-700`;
+    default:
+      return `${base} bg-slate-100 text-slate-700`;
+  }
+}
+
+function sourceBadge(source) {
+  const base =
+    "inline-flex rounded-full px-3 py-1 text-xs font-semibold capitalize";
+  switch (source) {
+    case "upload":
+      return `${base} bg-blue-100 text-blue-700`;
+    case "pixel":
+      return `${base} bg-violet-100 text-violet-700`;
     default:
       return `${base} bg-slate-100 text-slate-700`;
   }
@@ -22,9 +37,20 @@ function statusBadge(status) {
 
 export default function CRM() {
   const [data, setData] = useState([]);
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
+  const [source, setSource] = useState("all");
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [pagination, setPagination] = useState({
+    page: 1,
+    limit: PAGE_SIZE,
+    total: 0,
+    totalPages: 0,
+    hasNextPage: false,
+    hasPrevPage: false,
+  });
 
   const fetchRecords = useCallback(async () => {
     try {
@@ -32,69 +58,135 @@ export default function CRM() {
 
       const res = await axios.get(API_URL, {
         params: {
+          page,
+          limit: PAGE_SIZE,
           search: search || undefined,
           status: status || undefined,
+          source: source || undefined,
         },
       });
 
-      setData(res.data || []);
+      setData(res.data?.data || []);
+      setPagination(
+        res.data?.pagination || {
+          page: 1,
+          limit: PAGE_SIZE,
+          total: 0,
+          totalPages: 0,
+          hasNextPage: false,
+          hasPrevPage: false,
+        },
+      );
     } catch (error) {
-      console.error("Failed to fetch records:", error);
+      console.error("Failed to fetch portal records:", error);
     } finally {
       setLoading(false);
     }
-  }, [search, status]);
+  }, [page, search, status, source]);
 
   useEffect(() => {
     fetchRecords();
-    const interval = setInterval(fetchRecords, 3000);
+    const interval = setInterval(fetchRecords, 10000);
     return () => clearInterval(interval);
   }, [fetchRecords]);
+
+  const applyFilters = () => {
+    setPage(1);
+    setSearch(searchInput.trim());
+  };
+
+  const resetFilters = () => {
+    setSearchInput("");
+    setSearch("");
+    setStatus("");
+    setSource("all");
+    setPage(1);
+  };
 
   return (
     <div className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
       <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h2 className="text-xl font-semibold text-slate-900">CRM Records</h2>
+          <h2 className="text-xl font-semibold text-slate-900">
+            Portal Records
+          </h2>
           <p className="mt-1 text-sm text-slate-500">
-            Search and monitor TrustedForm processing records.
+            Showing both file upload and Ringba pixel TrustedForm records.
           </p>
         </div>
 
-        <div className="flex flex-col gap-3 sm:flex-row">
-          <input
-            type="text"
-            placeholder="Search by CID or URL"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 sm:w-72"
-          />
+        <div className="text-sm text-slate-500">
+          Total Records:{" "}
+          <span className="font-semibold text-slate-900">
+            {pagination.total}
+          </span>
+        </div>
+      </div>
 
-          <select
-            value={status}
-            onChange={(e) => setStatus(e.target.value)}
-            className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-          >
-            <option value="">All Statuses</option>
-            <option value="pending">Pending</option>
-            <option value="processing">Processing</option>
-            <option value="retained">Retained</option>
-            <option value="error">Error</option>
-          </select>
+      <div className="mb-5 grid grid-cols-1 gap-3 lg:grid-cols-5">
+        <input
+          type="text"
+          placeholder="Search CID, phone, call ID, TF URL..."
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+          className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 lg:col-span-2"
+        />
 
+        <select
+          value={source}
+          onChange={(e) => {
+            setSource(e.target.value);
+            setPage(1);
+          }}
+          className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+        >
+          <option value="all">All Sources</option>
+          <option value="upload">File Upload</option>
+          <option value="pixel">Ringba Pixel</option>
+        </select>
+
+        <select
+          value={status}
+          onChange={(e) => {
+            setStatus(e.target.value);
+            setPage(1);
+          }}
+          className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+        >
+          <option value="">All Statuses</option>
+          <option value="pending">Pending</option>
+          <option value="queued">Queued</option>
+          <option value="processing">Processing</option>
+          <option value="retained">Retained</option>
+          <option value="error">Error</option>
+        </select>
+
+        <div className="flex gap-2">
           <button
-            onClick={fetchRecords}
-            className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-slate-700"
+            onClick={applyFilters}
+            className="flex-1 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-slate-700"
           >
-            Refresh
+            Search
+          </button>
+          <button
+            onClick={resetFilters}
+            className="flex-1 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            Reset
           </button>
         </div>
       </div>
 
       <div className="mb-4 flex items-center justify-between">
         <div className="text-sm text-slate-500">
-          Total visible records:{" "}
-          <span className="font-semibold text-slate-900">{data.length}</span>
+          Page{" "}
+          <span className="font-semibold text-slate-900">
+            {pagination.page}
+          </span>{" "}
+          of{" "}
+          <span className="font-semibold text-slate-900">
+            {pagination.totalPages || 1}
+          </span>
         </div>
 
         {loading && (
@@ -108,16 +200,28 @@ export default function CRM() {
             <thead className="bg-slate-50">
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600">
-                  CID
+                  Source
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600">
-                  TrustedForm URL
+                  CID / Phone
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600">
+                  Call ID
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600">
+                  TrustedForm
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600">
                   Status
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600">
                   Message
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600">
+                  Attempts
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-600">
+                  Created
                 </th>
               </tr>
             </thead>
@@ -126,7 +230,7 @@ export default function CRM() {
               {!loading && data.length === 0 && (
                 <tr>
                   <td
-                    colSpan="4"
+                    colSpan="8"
                     className="px-4 py-10 text-center text-sm text-slate-500"
                   >
                     No records found.
@@ -135,9 +239,21 @@ export default function CRM() {
               )}
 
               {data.map((r) => (
-                <tr key={r._id} className="hover:bg-slate-50">
-                  <td className="whitespace-nowrap px-4 py-4 text-sm font-medium text-slate-900">
-                    {r.cid || "-"}
+                <tr key={`${r.source}-${r._id}`} className="hover:bg-slate-50">
+                  <td className="whitespace-nowrap px-4 py-4 text-sm">
+                    <span className={sourceBadge(r.source)}>
+                      {r.sourceLabel || r.source}
+                    </span>
+                  </td>
+
+                  <td className="px-4 py-4 text-sm text-slate-900">
+                    <div className="font-medium">
+                      {r.cid || r.phoneNumber || "-"}
+                    </div>
+                  </td>
+
+                  <td className="px-4 py-4 text-sm text-slate-600">
+                    {r.ringbaCallId || "-"}
                   </td>
 
                   <td className="max-w-md px-4 py-4 text-sm text-blue-600">
@@ -149,6 +265,11 @@ export default function CRM() {
                     >
                       {r.trustedFormUrl}
                     </a>
+                    {r.trustedId ? (
+                      <div className="mt-1 text-xs text-slate-500 break-all">
+                        ID: {r.trustedId}
+                      </div>
+                    ) : null}
                   </td>
 
                   <td className="whitespace-nowrap px-4 py-4 text-sm">
@@ -160,10 +281,46 @@ export default function CRM() {
                       {r.message || "-"}
                     </div>
                   </td>
+
+                  <td className="whitespace-nowrap px-4 py-4 text-sm text-slate-600">
+                    {r.attempts ?? 0}
+                  </td>
+
+                  <td className="whitespace-nowrap px-4 py-4 text-sm text-slate-600">
+                    {r.createdAt ? new Date(r.createdAt).toLocaleString() : "-"}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-sm text-slate-500">
+          Showing{" "}
+          <span className="font-semibold text-slate-900">{data.length}</span> of{" "}
+          <span className="font-semibold text-slate-900">
+            {pagination.total}
+          </span>
+        </div>
+
+        <div className="flex gap-2">
+          <button
+            disabled={!pagination.hasPrevPage}
+            onClick={() => setPage((prev) => Math.max(prev - 1, 1))}
+            className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Previous
+          </button>
+
+          <button
+            disabled={!pagination.hasNextPage}
+            onClick={() => setPage((prev) => prev + 1)}
+            className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Next
+          </button>
         </div>
       </div>
     </div>

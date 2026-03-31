@@ -6,6 +6,7 @@ const path = require("path");
 const connectDB = require("./config/db");
 const routes = require("./routes/routes");
 const ringbaPixelRoutes = require("./routes/ringbaPixelRoutes");
+const portalRoutes = require("./routes/portalRoutes");
 
 const app = express();
 
@@ -18,7 +19,7 @@ connectDB();
 // API routes
 app.use("/api", routes);
 app.use("/api", ringbaPixelRoutes);
-
+app.use("/api", portalRoutes);
 // React build folder
 const buildPath = path.join(__dirname, "frontend", "build");
 
@@ -30,7 +31,7 @@ app.get(/^(?!\/api).*/, (req, res) => {
   res.sendFile(path.join(buildPath, "index.html"));
 });
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5001;
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
